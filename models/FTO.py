@@ -45,6 +45,8 @@ class FTO(nn.module):
         
         self.projection = torch.nn.Linear(self.representation_dim, self.output_dim)
 
+
+
     def forward(self, x, partial_pred=None):
         x = self.lifting(x)
         x_ft = self.fourierbining.fourier_transform(x)
@@ -62,3 +64,23 @@ class FTO(nn.module):
         x = self.projection(x)
         return x
     
+
+    def predict_sequence(self, x_seq, pred_horizon):
+        """
+        Predict a sequence of length pred_horizon given input x.
+
+        Parameters:
+        - x_seq : Input tensor of shape (batch_size, seq_len, input_dim).
+        - pred_horizon : Length of the prediction horizon.
+
+        Returns:
+        - predictions : Tensor of shape (batch_size, pred_horizon, output_dim).
+        """
+        self.eval()
+        current_input = x_seq.clone()  # (batch_size, seq_len, input_dim)
+
+        for t in range(pred_horizon):
+            output = self.forward(current_input)
+            current_input = torch.cat((current_input[:, 1:, ...], output), dim=1)  # Slide the window
+
+        return current_input  # (batch_size, pred_horizon, output_dim)

@@ -3,15 +3,152 @@ import torch
 import os 
 import time
 
+from tabulate import tabulate
+from tqdm import tqdm
+
+from metric_logger import MetricLogger
+
 class Trainer():
 
-    def __init__(self, model, optimizer, loss_fn, scheduler, device="cpu"):
+    def __init__(self, model, train_loader, test_loader, loss_fn, optimizer, scheduler, num_epochs, device, exp_dir, exp_name, metrics):
         super(Trainer, self).__init__()
+
         self.model = model
         self.optimizer = optimizer
         self.loss_fn = loss_fn
         self.scheduler = scheduler
         self.device = device
+        self.num_epochs = num_epochs
+        self.train_loader = train_loader
+        self.test_loader = test_loader
+        self.exp_dir = exp_dir
+        self.exp_name = exp_name
+        self.metrics = metrics
 
+    def train_epoch(self):
+
+
+        # Training loop for one epoch
+        self.model.train()
+        train_loss = 0.0
+        train_metrics = {k: 0.0 for k in self.metrics.keys()}
+
+        for batch_idx, (inputs, targets) in enumerate(self.train_loader):
+
+            inputs, targets = inputs.to(self.device), targets.to(self.device) 
+            self.optimizer.zero_grad()
+
+            outputs = self.model.predict_sequence(inputs, pred_horizon=targets.shape[1])
+            loss = self.loss_fn(outputs, targets)
+
+            loss.backward()
+            self.optimizer.step()
+            if self.scheduler:
+                self.scheduler.step()
+        
+            train_loss += loss.item()
+            for name, metric_fn in self.metrics.items():
+                train_metrics[name] += metric_fn(outputs, targets).item()
+
+        avg_epoch_loss = train_loss / len(self.train_loader)
+        for name in train_metrics.keys():
+            train_metrics[name] /= len(self.train_loader)
+        train_metrics["loss"] = avg_epoch_loss
+
+
+        # Evaluation loop for one epoch
+        self.model.eval()
+        test_loss = 0.0
+        test_metrics = {k: 0.0 for k in self.metrics.keys()}
+
+        with torch.no_grad():
+            for batch_idx, (inputs, targets) in enumerate(self.test_loader):
+                inputs, targets = inputs.to(self.device), targets.to(self.device) 
+
+                outputs = self.model.predict_sequence(inputs, pred_horizon=targets.shape[1])
+                loss = self.loss_fn(outputs, targets)
+                test_loss += loss.item()
+
+                for name, metric_fn in self.metrics.items():
+                    test_metrics[name] += metric_fn(outputs, targets).item()
+
+            
+            avg_test_loss = test_loss / len(self.test_loader)
+            for name in test_metrics.keys():
+                test_metrics[name] /= len(self.test_loader)
+            test_metrics["loss"] = avg_test_loss
+
+
+        current_lr = self.optimizer.param_groups[0]['lr']
+
+        return train_metrics, test_metrics, current_lr
     
-    
+
+    def train_loop(self):
+
+
+        headers = ["Epoch"] + \
+                  [f"Train {k}" for k in self.metrics] + \
+                  [f"Test {k}" for k in self.metrics] + \
+                  ["LR", "Time(s)"]
+        
+        csv_path = os.path.join(self.exp_dir, self.exp_name, 'logs', 'metrics.csv')
+        self.logger = MetricLogger(csv_path, headers)
+
+        self.min_train_loss = 1000 
+        self.min_test_loss  = 1000
+
+        for epoch in range(self.num_epochs):
+
+            start_time = time.time()
+            train_metrics, test_metrics, current_lr = self.train_epoch()
+            end_time = time.time()
+
+            epoch_duration = end_time - start_time
+            headers = ["Epoch"] + \
+                      [f"Train {k}" for k in train_metrics] + \
+                      [f"Test {k}" for k in test_metrics] + ["LR", "Time(s)"]
+
+            row = [epoch + 1] + \
+                  [v for v in train_metrics.values()] + \
+                  [v for v in test_metrics.values()] + \
+                  [current_lr, epoch_duration]
+
+            table_str = tabulate([row], headers=headers, tablefmt="pretty", floatfmt=".6f")
+            tqdm.write(table_str)
+
+            row_dict = {h: val for h, val in zip(headers, row)}
+            self.logger.log(row_dict)
+
+            # Save the best model based on test loss
+            if test_metrics['loss'] < self.min_test_loss:
+                self.min_test_loss = test_metrics['loss']
+                path = os.path.join(self.exp_dir, self.exp_name, 'model_weights', 'min_test_loss.pth')
+                torch.save({'epoch':epoch,
+                            'model_state_dict': self.model.state_dict(),
+                            'optimizer_state_dict':self.optimizer.state_dict()},
+                            path)
+                
+                print(f"Best model saved at epoch {epoch+1} with test loss: {self.min_test_loss:.6f}")
+
+
+            if train_metrics['loss'] < self.min_train_loss:
+                self.min_train_loss = train_metrics['loss']
+                path = os.path.join(self.exp_dir, self.exp_name, 'model_weights', 'min_train_loss.pth')
+                torch.save({'epoch':epoch,
+                            'model_state_dict': self.model.state_dict(),
+                            'optimizer_state_dict':self.optimizer.state_dict()},
+                            path)
+                
+                print(f"Best model saved at epoch {epoch+1} with train loss: {self.min_train_loss:.6f}")
+
+
+        path = os.path.join(self.exp_dir, self.exp_name, 'model_weights', 'min_train_loss.pth')
+        torch.save({'epoch':epoch,
+                    'model_state_dict': self.model.state_dict(),
+                    'optimizer_state_dict':self.optimizer.state_dict()},
+                    path)
+        
+        print(f"Final model saved at epoch {epoch+1} with train loss: {train_metrics['loss']:.6f} and test loss: {test_metrics['loss']:.6f}")     
+
+        self.logger.close()
