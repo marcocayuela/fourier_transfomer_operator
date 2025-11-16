@@ -1,9 +1,10 @@
 import os
 from training.dataset_manager import DatasetManager
 from training.trainer import Trainer
-from factory import Factory
-from models import FTO
+from experiments.factory import Factory
+from models.FTO import FTO
 import torch
+import yaml
 
 class FTOTraining():
 
@@ -37,7 +38,7 @@ class FTOTraining():
         self.datasets = DatasetManager(self.exp_dir, self.seq_length, self.batch_size, self.num_workers)
 
         # Model definition
-        self.name_weights_to_load = self.args["name_weights_to_load"]
+        self.name_weights_to_load = self.args.get("name_weights_to_load", None)
 
         self.input_dim = self.args["input_dim"]
         self.output_dim = self.args["output_dim"]
@@ -63,12 +64,18 @@ class FTOTraining():
         for d in directories:
             os.makedirs(d, exist_ok=True)
 
+        save_dir = os.path.join('runs',self.exp_dir, self.exp_name)
+        save_path = os.path.join(save_dir, "config.yaml")
+        with open(save_path, "w") as f:
+            yaml.safe_dump(self.args, f)  # écrit le dictionnaire args dans le fichier
+
+
 
     def execute_experience(self):
 
 
         # Dataloaders creation
-        self.datasets = DatasetManager(self.exp, self.seq_length, self.batch_size, self.num_workers)
+        self.datasets = DatasetManager(self.exp_dir, self.seq_length, self.batch_size, self.num_workers)
 
         # Directories creation
         self.make_directories()
@@ -76,8 +83,10 @@ class FTOTraining():
         # Load or create model
         model = FTO(self.input_dim, self.output_dim, self.representation_dim,
                     self.device, self.modes_separation, self.n_dim,
-                    self.domain_size, self.norm, self.seq_len, self.n_heads,
+                    self.domain_size, self.norm_separation, self.seq_length, self.n_heads,
                     self.n_attblocks, self.hidden_dim)
+        
+        print(f"Number parameters: {model.count_parameters()}")
 
         if self.name_weights_to_load is not None:
             path_model = os.path.join('runs',self.exp_dir,self.exp_name,'model_weights')
@@ -86,9 +95,12 @@ class FTOTraining():
             state_dict = loaded_weights['model_state_dict']
             model.load_state_dict(state_dict)
 
+        model = model.to(self.device).float()
+
         self.optimizer = Factory.get_optimizer(self.optimizer_info["type"], model.parameters(), lr=self.optimizer_info["lr"])
-        self.scheduler = Factory.get_scheduler(self.scheduler_info, self.optimizer, max_lr=self.optimizer_info["lr"], n_epoch=self.num_epochs, n_batch=self.datasets.batch_size)
-        self.metrics = [Factory.get_metric(metric) for metric in self.metrics_name]
+        self.scheduler = Factory.get_scheduler(self.scheduler_info, self.optimizer, max_lr=self.optimizer_info["lr"], n_epoch=self.num_epochs, n_batch=len(self.datasets.training_sequence_dataset))
+        self.metrics = {metric: Factory.get_metric(metric) for metric in self.metrics_name}
+        self.loss_fn = Factory.get_metric(self.loss_fn)
         # Create the trainer and train
 
         trainer = Trainer(model=model,

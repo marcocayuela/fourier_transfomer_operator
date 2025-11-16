@@ -12,7 +12,7 @@ domain_size:
 # Model parameters
 modes_separation: 
   - 8
-norm_separation: l2
+norm_separation: L2
 representation_dim: 4
 n_heads: 8
 n_attblocks: 1
@@ -20,13 +20,14 @@ hidden_dim: 64
 
 
 # Training parameters
+num_epochs: 15
 seq_length: 10
 batch_size: 64
 num_workers: 4
 loss_fn: mse 
 optimizer: 
   type: adam
-  lr: 0.001
+  lr: 0.01
 scheduler: one_cycle_lr
 metrics:
   - rmse

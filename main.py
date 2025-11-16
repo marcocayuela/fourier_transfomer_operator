@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import random
 import yaml
+import os 
 
 
 def set_seed(seed: int):
@@ -21,10 +22,12 @@ def set_seed(seed: int):
 
 
 if __name__ == "__main__":
-    with open("config.yaml", "r") as f:
+    with open("config_command.yaml", "r") as f:
         args = yaml.safe_load(f)
-        set_seed(args["seed"])
+    
+    set_seed(args["seed"])
 
-        experiment = FTOTraining(args)
-        FTOTraining.execute_experience()        
+    experiment = FTOTraining(args)
+    experiment.execute_experience()  
+
         

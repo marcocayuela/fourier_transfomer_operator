@@ -4,4 +4,7 @@ data/kolmogorov/*
 !data/**/*.gitkeep
 runs/*
 !runs/.gitkeep
-
+__pycache__/
+*.pyc
+*.pyo
+*.pyd

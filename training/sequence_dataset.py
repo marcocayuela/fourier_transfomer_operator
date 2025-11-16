@@ -1,4 +1,5 @@
 from torch.utils.data import Dataset
+import torch
 
 class SequenceDataset(Dataset):
     
@@ -15,6 +16,6 @@ class SequenceDataset(Dataset):
         return len(self.data) - 2 * self.seq_length
 
     def __getitem__(self, idx):
-        x = self.data[idx : idx + self.seq_length]
-        y = self.data[idx + self.seq_length : idx + 2 * self.seq_length]
+        x = torch.from_numpy(self.data[idx : idx + self.seq_length]).float()
+        y = torch.from_numpy(self.data[idx + self.seq_length : idx + 2 * self.seq_length]).float()
         return x, y

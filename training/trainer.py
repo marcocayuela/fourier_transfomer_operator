@@ -6,7 +6,7 @@ import time
 from tabulate import tabulate
 from tqdm import tqdm
 
-from metric_logger import MetricLogger
+from training.metric_logger import MetricLogger
 
 class Trainer():
 
@@ -35,12 +35,12 @@ class Trainer():
 
         for batch_idx, (inputs, targets) in enumerate(self.train_loader):
 
-            inputs, targets = inputs.to(self.device), targets.to(self.device) 
+            inputs, targets = inputs.to(self.device).float(), targets.to(self.device).float()
             self.optimizer.zero_grad()
 
             outputs = self.model.predict_sequence(inputs, pred_horizon=targets.shape[1])
-            loss = self.loss_fn(outputs, targets)
 
+            loss = self.loss_fn(outputs, targets)
             loss.backward()
             self.optimizer.step()
             if self.scheduler:
@@ -63,7 +63,7 @@ class Trainer():
 
         with torch.no_grad():
             for batch_idx, (inputs, targets) in enumerate(self.test_loader):
-                inputs, targets = inputs.to(self.device), targets.to(self.device) 
+                inputs, targets = inputs.to(self.device).float(), targets.to(self.device).float()
 
                 outputs = self.model.predict_sequence(inputs, pred_horizon=targets.shape[1])
                 loss = self.loss_fn(outputs, targets)
@@ -90,6 +90,7 @@ class Trainer():
         headers = ["Epoch"] + \
                   [f"Train {k}" for k in self.metrics] + \
                   [f"Test {k}" for k in self.metrics] + \
+                  ["Train loss", "Test loss"] + \
                   ["LR", "Time(s)"]
         
         csv_path = os.path.join('runs',self.exp_dir, self.exp_name, 'logs', 'metrics.csv')
@@ -114,7 +115,7 @@ class Trainer():
                   [v for v in test_metrics.values()] + \
                   [current_lr, epoch_duration]
 
-            table_str = tabulate([row], headers=headers, tablefmt="pretty", floatfmt=".6f")
+            table_str = tabulate([row], headers=headers, tablefmt="pretty", floatfmt=".3f")
             tqdm.write(table_str)
 
             row_dict = {h: val for h, val in zip(headers, row)}
@@ -123,7 +124,7 @@ class Trainer():
             # Save the best model based on test loss
             if test_metrics['loss'] < self.min_test_loss:
                 self.min_test_loss = test_metrics['loss']
-                path = os.path.join('run',self.exp_dir, self.exp_name, 'model_weights', 'min_test_loss.pth')
+                path = os.path.join('runs',self.exp_dir, self.exp_name, 'model_weights', 'min_test_loss.pth')
                 torch.save({'epoch':epoch,
                             'model_state_dict': self.model.state_dict(),
                             'optimizer_state_dict':self.optimizer.state_dict()},
@@ -134,7 +135,7 @@ class Trainer():
 
             if train_metrics['loss'] < self.min_train_loss:
                 self.min_train_loss = train_metrics['loss']
-                path = os.path.join('run',self.exp_dir, self.exp_name, 'model_weights', 'min_train_loss.pth')
+                path = os.path.join('runs',self.exp_dir, self.exp_name, 'model_weights', 'min_train_loss.pth')
                 torch.save({'epoch':epoch,
                             'model_state_dict': self.model.state_dict(),
                             'optimizer_state_dict':self.optimizer.state_dict()},
@@ -143,7 +144,7 @@ class Trainer():
                 print(f"Best model saved at epoch {epoch+1} with train loss: {self.min_train_loss:.6f}")
 
 
-        path = os.path.join('run',self.exp_dir, self.exp_name, 'model_weights', 'min_train_loss.pth')
+        path = os.path.join('runs',self.exp_dir, self.exp_name, 'model_weights', 'final_model.pth')
         torch.save({'epoch':epoch,
                     'model_state_dict': self.model.state_dict(),
                     'optimizer_state_dict':self.optimizer.state_dict()},

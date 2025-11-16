@@ -32,7 +32,7 @@ def relative_mae(y_pred, y_true, eps=1e-8):
 class Factory():
 
     OPTIMIZERS = {"adam": torch.optim.Adam, "sgd": torch.optim.SGD}
-    SCHEDULER = {torch.optim.lr_scheduler.OneCycleLR}
+    SCHEDULERS = {"one_cycle_lr": torch.optim.lr_scheduler.OneCycleLR}
 
     METRICS = {"mse": torch.nn.MSELoss(),
                "rmse": lambda y_pred, y_true: torch.sqrt(torch.mean((y_pred - y_true)**2)),
@@ -46,7 +46,7 @@ class Factory():
     
     @staticmethod
     def get_scheduler(name, optimizer, max_lr, n_epoch, n_batch, **kwargs):
-        return Factory.SCHEDULERS[name](optimizer, max_lr, n_epoch, math.ceil(n_epoch/n_batch)**kwargs)
+        return Factory.SCHEDULERS[name](optimizer, max_lr=max_lr, epochs=n_epoch, steps_per_epoch=n_batch, **kwargs)
 
     @staticmethod
     def get_metric(name):

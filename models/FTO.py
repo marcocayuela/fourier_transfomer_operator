@@ -4,20 +4,20 @@ import torch.nn as nn
 from models.blocks import *
 
 
-class FTO(nn.module):
+class FTO(nn.Module):
     """
     Fourier Transformer Operator model.
     """
 
     def __init__(self, input_dim, output_dim, representation_dim, device, modes_separation,
-                 n_dim, domain_size, norm, seq_len, n_heads, n_attblocks, hidden_dim):
+                 n_dim, domain_size, norm_separation, seq_len, n_heads, n_attblocks, hidden_dim):
         """
         Initialise FTO module.
 
         Parameters:
         - args : Arguments containing model hyperparameters.
         """
-        super(FTO).__init__()
+        super().__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.representation_dim = representation_dim
@@ -25,7 +25,7 @@ class FTO(nn.module):
         self.modes_separation = modes_separation
         self.n_dim = n_dim
         self.domain_size = domain_size
-        self.norm_separation = norm
+        self.norm_separation = norm_separation
 
         self.seq_len = seq_len
         self.n_heads = n_heads
@@ -35,16 +35,18 @@ class FTO(nn.module):
         
         self.lifting = LiftingLayer(input_dim=self.input_dim, output_dim=self.representation_dim, device=self.device)
         self.fourierbining = FourierBining(modes_separation=self.modes_separation, n_dim=self.n_dim,
-                                            domain_size=self.domain_size, norm=self.norm_separation, device=self.device)
+                                            domain_size=self.domain_size, norm_separation=self.norm_separation, device=self.device)
         
-        self.transformers = []
-        for i in range(self.fourierbining.num_bins):
-            n_obs = self.fourierbining.input_model_shape[i]
-            transformer_block = TransformerModel(input_dim=n_obs, seq_len=self.seq_len, n_heads=self.n_heads, 
-                                                 hidden_dim=self.hidden_dim, n_attblocks=self.n_attblocks, device=self.device)
-            self.transformers.append(transformer_block)
+        self.transformers = nn.ModuleList([
+            TransformerModel(n_obs=self.fourierbining.bins_size[i]*self.representation_dim,
+                             seq_len=self.seq_len,
+                             n_heads=self.n_heads,
+                             hidden_dim=self.hidden_dim,
+                             n_attblocks=self.n_attblocks,
+                             device=self.device) 
+                             for i in range(self.fourierbining.n_bins)])
         
-        self.projection = torch.nn.Linear(self.representation_dim, self.output_dim)
+        self.projection = LiftingLayer(input_dim=self.representation_dim, output_dim=self.output_dim, device=self.device)
 
 
 
@@ -78,10 +80,14 @@ class FTO(nn.module):
         - predictions : Tensor of shape (batch_size, pred_horizon, output_dim).
         """
         self.eval()
-        current_input = x_seq.clone()  # (batch_size, seq_len, input_dim)
+        current_input = x_seq.clone()  # (batch_size, seq_len, dim_1, ..., dim_n, representation_dim)
 
         for t in range(pred_horizon):
-            output = self.forward(current_input)
-            current_input = torch.cat((current_input[:, 1:, ...], output), dim=1)  # Slide the window
+            output = self.forward(current_input) # (batch_size, dim_1, ..., dim_n, representation_dim)
+            current_input = torch.cat((current_input[:, 1:, ...], output[:,None,...]), dim=1)  # Slide the window
 
         return current_input  # (batch_size, pred_horizon, output_dim)
+    
+    def count_parameters(self):
+        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        return trainable_params

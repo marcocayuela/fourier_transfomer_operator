@@ -46,7 +46,6 @@ class FourierBining():
         self.norm_separation = norm_separation
         self.device = device
 
-
         self.k_mesh = None
         self.k_magnitude = None
         self.rk_magnitude = None
@@ -55,15 +54,14 @@ class FourierBining():
         self.shapes_bin = None
         self.input_model_shape = None
         self.x_gridsize = None
+        self.bins_size = None
 
-    
+
         self.magnitude_spectrum()
         self.create_masks() 
-
+        self.compute_bin_input_shapes()
+    
         
-        
-
-
     def magnitude_spectrum(self):
         k_axes = []
         for L in self.domain_size:
@@ -103,7 +101,8 @@ class FourierBining():
         """ x tensor of shape (batch_size, seq_len, dim_1, dim_2, ..., dim_n, representation_dim) """
         self.x_gridsize = x.shape[2:2+self.n_dim]
         x =  x.permute(0, 1, -1, *range(2, 2 + self.n_dim))  # (batch_size, seq_len, representation_dim, dim_1, dim_2, ..., dim_n)
-        x_ft = torch.fft.rfftn(x, dim=tuple(range(3, 3 + self.n_dim)))  # (batch_size, seq_len, representation_dim, freq_dim_1, freq_dim_2, ..., freq_dim_n)
+        fft_shape = self.n_dim * [self.freq_max*2]
+        x_ft = torch.fft.rfftn(x, s=fft_shape, dim=tuple(range(3, 3 + self.n_dim)))  # (batch_size, seq_len, representation_dim, freq_dim_1, freq_dim_2, ..., freq_dim_n)
         self.fourier_shape = x_ft.shape
         return x_ft
     
@@ -116,7 +115,7 @@ class FourierBining():
             bin = x_ft[..., mask] # (batch_size, seq_len, representation_dim, bin_dim_1, bin_dim_2, ..., bin_dim_n)
             shapes_bin.append(bin.shape)
             bin = bin.flatten(start_dim=2)
-            bin = torch.concatenate([bin.real, bin.imag], axis=-1) # (batch_size, seq_len, flattened_bin_dim = 2*prod_dims*representation_dim)
+            bin = torch.concatenate([bin.real, bin.imag], axis=-1).to(self.device).float() # (batch_size, seq_len, flattened_bin_dim = 2*prod_dims*representation_dim)
             input_model_shapes.append(bin.shape[-1])
             binned_x_ft.append(bin)      
         self.shapes_bin = shapes_bin   
@@ -137,10 +136,19 @@ class FourierBining():
         return unbinned_x_ft  # tensor of shape (batch_size, representation_dim, freq_dim_1, freq_dim_2, ..., freq_dim_n)
 
     def inverse_fourier_transform(self, x_ft):
-        """ x_ft tensor of shape (batch_size, seq_len, representation_dim, freq_dim_1, freq_dim_2, ..., freq_dim_n) """
-        x = torch.fft.irfftn(x_ft, s=[(self.x_gridsize[i]) for i in range(self.n_dim)], dim=tuple(range(3, 3 + self.n_dim)))  # (batch_size, representation_dim, dim_1, dim_2, ..., dim_n)
+        """ x_ft tensor of shape (batch_size, representation_dim, freq_dim_1, freq_dim_2, ..., freq_dim_n) """
+        x = torch.fft.irfftn(x_ft, s=[(self.x_gridsize[i]) for i in range(self.n_dim)], dim=tuple(range(2, 2 + self.n_dim))) # (batch_size, representation_dim, dim_1, dim_2, ..., dim_n)
         x = x.permute(0, *range(2, 2 + self.n_dim), 1)  # (batch_size, dim_1, dim_2, ..., dim_n, representation_dim)
         return x
+    
+    def compute_bin_input_shapes(self):
+        self.bins_size = []
+        # Count how many True in each mask → taille du bin
+        for mask in self.masks:
+            bin_size = mask.sum().item()       # number of frequency positions in this bin
+            # Flatten & concat real + imag → multiply by 2
+            flattened_dim = bin_size * 2
+            self.bins_size.append(flattened_dim)
 
 ###################################################################################################
 
@@ -252,30 +260,30 @@ class TransformerModel(torch.nn.Module):
 
         self.device = device
         self.dim = n_obs
-        self.seq_len = seq_len - 1
+        self.seq_len = seq_len
         self.num_heads = n_heads
         self.nattblocks = n_attblocks
         self.hidden_dim = hidden_dim
 
-        self.input_embedding = nn.Linear(self.dim, self.hidden_dim)
-        self.output_embedding = nn.Linear(self.hidden_dim, self.dim)
+        self.input_embedding = nn.Linear(self.dim, self.hidden_dim).to(self.device)
+        self.output_embedding = nn.Linear(self.hidden_dim, self.dim).to(self.device)
 
-        position = torch.arange(0, self.seq_len).unsqueeze(-1)
-        div_term = torch.exp(torch.arange(0, self.hidden_dim, 2) * (-math.log(10000.0) / self.hidden_dim))
-        TE = torch.zeros(self.seq_len, self.hidden_dim)
+        position = torch.arange(0, self.seq_len, device=self.device).unsqueeze(-1)
+        div_term = torch.exp(torch.arange(0, self.hidden_dim, 2, device=self.device) * (-math.log(10000.0) / self.hidden_dim))
+        TE = torch.zeros(self.seq_len, self.hidden_dim, device=self.device).float()
         TE[:, 0::2] = torch.sin(position * div_term)
         TE[:, 1::2] = torch.cos(position * div_term)
         self.register_buffer('TE', TE)
 
         self.att_blocks = torch.nn.ModuleList([
             Attention_Block(self.hidden_dim, self.num_heads, self.seq_len) for _ in range(self.nattblocks)
-        ])
+        ]).to(self.device)
 
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(self.hidden_dim, self.hidden_dim * 2),
             torch.nn.ReLU(),
             torch.nn.Linear(self.hidden_dim * 2, self.hidden_dim)
-        )
+        ).to(self.device)
 
     def forward(self, z):
 

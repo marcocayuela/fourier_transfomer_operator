@@ -2,7 +2,7 @@ import numpy as np
 import os 
 import h5py
 
-from sequence_dataset import SequenceDataset
+from training.sequence_dataset import SequenceDataset
 from torch.utils.data import DataLoader
 
 class DatasetManager():
@@ -25,7 +25,7 @@ class DatasetManager():
             train_path = os.path.join(data_dir,'train.h5')
             with h5py.File(train_path, "r") as f:
                 self.training_set = f["velocity_field"][()]
-                self.simulation_time_train = f["time"][()] + self.dt = f["dt"][()]
+                self.simulation_time_train = f["time"][()] + f["dt"][()]
                 self.dt = self.simulation_time_train/self.training_set.shape[0]
                 self.n_dim = f["ndim"][()]
                 self.nf = f["nf"][()]
@@ -37,7 +37,7 @@ class DatasetManager():
             test_path = os.path.join(data_dir,'test.h5')
             with h5py.File(test_path, "r") as f:
                 self.testing_set = f["velocity_field"][()]
-                self.simulation_time_test = f["time"][()] + self.dt = f["dt"][()]
+                self.simulation_time_test = f["time"][()] + f["dt"][()]
 
     
         self.training_sequence_dataset = SequenceDataset(self.training_set, seq_length=self.seq_length)
