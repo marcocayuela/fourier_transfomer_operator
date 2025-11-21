@@ -1,7 +1,10 @@
 import torch
 import torch.nn as nn
 
+from tqdm import tqdm
+
 from models.blocks import *
+
 
 
 class FTO(nn.Module):
@@ -10,7 +13,7 @@ class FTO(nn.Module):
     """
 
     def __init__(self, input_dim, output_dim, representation_dim, device, modes_separation,
-                 n_dim, domain_size, norm_separation, seq_len, n_heads, n_attblocks, hidden_dim):
+                 n_dim, domain_size, norm_separation, seq_length, n_heads, n_attblocks, hidden_dim):
         """
         Initialise FTO module.
 
@@ -27,7 +30,7 @@ class FTO(nn.Module):
         self.domain_size = domain_size
         self.norm_separation = norm_separation
 
-        self.seq_len = seq_len
+        self.seq_len = seq_length
         self.n_heads = n_heads
         self.n_attblocks = n_attblocks
         self.hidden_dim = hidden_dim 
@@ -68,7 +71,7 @@ class FTO(nn.Module):
         return x
     
 
-    def predict_sequence(self, x_seq, pred_horizon):
+    def predict_sequence(self, x_seq, pred_horizon, barplot=False):
         """
         Predict a sequence of length pred_horizon given input x.
 
@@ -81,12 +84,14 @@ class FTO(nn.Module):
         """
         self.eval()
         current_input = x_seq.clone()  # (batch_size, seq_len, dim_1, ..., dim_n, representation_dim)
+        full_output = torch.zeros((x_seq.shape[0], pred_horizon, *x_seq.shape[2:]), device=self.device)
 
-        for t in range(pred_horizon):
+        for t in tqdm(range(pred_horizon)) if barplot else range(pred_horizon):
             output = self.forward(current_input) # (batch_size, dim_1, ..., dim_n, representation_dim)
+            full_output[:, t, ...] = output
             current_input = torch.cat((current_input[:, 1:, ...], output[:,None,...]), dim=1)  # Slide the window
 
-        return current_input  # (batch_size, pred_horizon, output_dim)
+        return full_output  # (batch_size, pred_horizon, output_dim)
     
     def count_parameters_per_module(self):
 
